@@ -1,7 +1,7 @@
 use riftnet_transport::interpolator::{Interpolator, Snapshot, Interpolatable};
 use riftnet_transport::transporter::Transporter;
 use riftnet_transport::NetworkReactor;
-use riftnet_core::{Tick, RiftError};
+use riftnet_core::{RiftError};
 use std::collections::VecDeque;
 use std::net::{SocketAddr, IpAddr, Ipv4Addr};
 

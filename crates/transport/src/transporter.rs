@@ -1,6 +1,6 @@
 // crates/transport/src/transporter.rs
 use crate::reactor::NetworkReactor;
-use crate::interpolator::{Interpolator, Interpolatable};
+use crate::interpolator::{Interpolator};
 use riftnet_core::RiftError;
 use std::net::SocketAddr;
 
