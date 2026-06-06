@@ -1,0 +1,53 @@
+[package]
+name = "riftnet-rust"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "server"
+path = "bin/server.rs"
+
+[[bin]]
+name = "client"
+path = "bin/client.rs"
+
+[workspace]
+members =[
+    "crates/core",
+    "crates/connection",
+    "crates/compression",
+    "crates/encryption",
+    "crates/protocol",
+    "crates/transport"
+]
+
+[dependencies]
+# --- Core & Async ---
+tokio = { version = "1.0", features = ["full"] }
+riftnet-core = { path = "crates/core" }
+riftnet-protocol = { path = "crates/protocol" }
+riftnet-transport = { path = "crates/transport" }
+riftnet-connection = { path = "crates/connection" }
+bytes = "1.7"                                    # Zero-copy buffer management
+parking_lot = "0.12"                             # Faster mutexes/rwlocks
+
+# --- Protocol & Data ---
+bytemuck = { version = "1.16", features = ["derive"] } # Safe casting for headers
+zerocopy = "0.7"                                 # Zero-cost header parsing
+serde = { version = "1.0", features = ["derive"] } # If you need serialization
+
+# --- Compression & Security ---
+zstd = "0.13"                                    # Zstd integration
+lz4_flex = "0.11"                                # LZ4 integration
+ring = "0.17"                                    # Cryptographic primitives (Sodium replacement)
+
+# --- Utilities ---
+tracing = "0.1"                                  # Standard Rust logging/tracing
+crossbeam-queue = "0.3"                          # MPMC queues (replaces your LockFreeQueue)
+tracing-subscriber = "0.3.23"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+io-uring = "0.5.13"
+
+[target.'cfg(not(target_os = "linux"))'.dependencies]
+# Use an alternative or dummy crate here for Windows
