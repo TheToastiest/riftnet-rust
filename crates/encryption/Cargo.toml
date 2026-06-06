@@ -1,0 +1,11 @@
+[package]
+name = "riftnet-encryption"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# Internal workspace dependency
+riftnet-core = { path = "../core" }
+
+# Security primitive
+ring = "0.17"

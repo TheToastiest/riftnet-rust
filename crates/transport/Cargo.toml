@@ -1,0 +1,8 @@
+[package]
+name = "riftnet-transport"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+riftnet-core = { path = "../core" }
+tokio = { version = "1.40", features = ["full"] }

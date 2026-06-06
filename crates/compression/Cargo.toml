@@ -1,0 +1,11 @@
+[package]
+name = "riftnet-compression"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# Link your internal core crate
+riftnet-core = { path = "../core" }
+
+# Add the external compression library
+lz4_flex = "0.11"
