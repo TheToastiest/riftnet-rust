@@ -10,3 +10,8 @@ fn test_cipher_initialization() {
     // Future: implement encryption/decryption test
     assert!(true);
 }
+#[test]
+fn test_cipher_encryption() {
+    let key = [0u8; 32];
+    let cipher = Cipher::new(&key);
+}
