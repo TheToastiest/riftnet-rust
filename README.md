@@ -1,4 +1,3 @@
-RiftNet-rust
 RiftNet-rust is a high-performance, 100% pure Rust networking and state-reconciliation engine. It was originally developed in C++ as the custom backbone for real-time robotics simulations and RiftForged—a fully custom, deterministic MMO ARPG driven by continuous F=MA physics.
 
 This repository represents the canonized port of that system into safe, idiomatic Rust. It is built strictly on an "Architecture First" philosophy: no black-box commercial engines, no unsafe shortcuts, and absolute deterministic server authority.
