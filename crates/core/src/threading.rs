@@ -61,7 +61,6 @@ impl TaskThreadPool {
                 }
             };
 
-            // Execute job wrapped in catch_unwind to prevent worker thread death
             let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(job));
         }
     }

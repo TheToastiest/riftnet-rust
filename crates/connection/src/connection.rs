@@ -4,6 +4,16 @@ use std::time::Instant;
 use std::collections::VecDeque;
 use riftnet_protocol::ReliableConnectionState;
 
+pub trait NetworkPipeline {
+    fn process(&self, data: &[u8]) -> Vec<u8>;
+}
+pub struct NullPipeline;
+
+impl NetworkPipeline for NullPipeline {
+    fn process(&self, data: &[u8]) -> Vec<u8> {
+        data.to_vec() // Just return the data as-is
+    }
+}
 pub struct PendingSend {
     pub data: Vec<u8>,
     pub reliable: bool,
@@ -14,31 +24,31 @@ pub struct Connection {
     pub is_server: bool,
     pub state: ReliableConnectionState,
     pub last_seen: Instant,
-
     // Cryptography State
     pub tx_nonce: u64,
-
-    // Send Queue (Replacing LockFreeMPMC for now)
-    // In Rust, if the ConnectionManager owns this exclusively on a single thread,
-    // a standard VecDeque is zero-cost. If accessed cross-thread, use crossbeam::queue::ArrayQueue.
     pub pending_queue: VecDeque<PendingSend>,
     pub pending_bytes: usize,
 
     pub max_pending_bytes: usize,
+    pub pipeline: Box<dyn NetworkPipeline + Send>,
 }
 
 impl Connection {
-    pub fn new(endpoint: SocketAddr, is_server: bool) -> Self {
+    pub fn new(
+        endpoint: SocketAddr,
+        is_server: bool,
+        pipeline: Box<dyn NetworkPipeline + Send> // Add this argument
+    ) -> Self {
         Self {
             endpoint,
             is_server,
             state: ReliableConnectionState::new(),
             last_seen: Instant::now(),
-            // Nonce parity: Server uses odd, Client uses even to prevent reflection
             tx_nonce: if is_server { 1 } else { 0 },
             pending_queue: VecDeque::with_capacity(1024),
             pending_bytes: 0,
-            max_pending_bytes: 1024 * 1024, // 1MB queue limit
+            max_pending_bytes: 1024 * 1024,
+            pipeline, // Initialize the field
         }
     }
 
@@ -71,9 +81,9 @@ impl Connection {
         while let Some(ps) = self.pending_queue.pop_front() {
             self.pending_bytes -= ps.data.len();
 
-            // Here is where you would compress and encrypt `ps.data` before sending
-            // let wire_packet = packet_factory::create(ps.data, ps.reliable, ...);
-            // send_func(&wire_packet);
+            // The pipeline handles: Compression -> Encryption -> HMAC/Tagging
+            let wire_data = self.pipeline.process(&ps.data);
+            send_func(&wire_data);
         }
     }
 

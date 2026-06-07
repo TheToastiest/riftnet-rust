@@ -3,7 +3,6 @@ use tokio::net::UdpSocket;
 use riftnet_core::RiftError;
 
 pub trait NetworkReactor: Send + Sync {
-    // Polls the reactor. Returns a list of (data, sender_addr) tuples.
     fn poll_packets(&mut self) -> Result<Vec<(Vec<u8>, SocketAddr)>, RiftError>;
     fn send_packet(&mut self, data: &[u8], addr: SocketAddr) -> Result<(), RiftError>;
 }
@@ -25,7 +24,6 @@ impl NetworkReactor for TokioReactor {
         let mut packets = Vec::new();
         let mut buf = [0u8; 2048]; // MTU-safe buffer
 
-        // Keep reading until the socket buffer is empty
         loop {
             match self.socket.try_recv_from(&mut buf) {
                 Ok((len, addr)) => {

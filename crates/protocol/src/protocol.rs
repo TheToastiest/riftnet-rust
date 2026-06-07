@@ -2,7 +2,6 @@
 use crate::packet::ReliabilityPacketHeader;
 use std::time::{Instant, Duration};
 
-// 1. Annotate UnackedPacket with PartialEq
 #[derive(Debug, Clone)]
 pub struct UnackedPacket {
     pub sequence: u16,
@@ -11,7 +10,6 @@ pub struct UnackedPacket {
     pub retries: u32,
 }
 
-// 2. Manually implement PartialEq for UnackedPacket, ignoring Instant
 impl PartialEq for UnackedPacket {
     fn eq(&self, other: &Self) -> bool {
         self.sequence == other.sequence &&
@@ -20,7 +18,6 @@ impl PartialEq for UnackedPacket {
     }
 }
 
-// 3. Now derive PartialEq on ReliableConnectionState
 #[derive(Debug, PartialEq, Clone)]
 pub struct ReliableConnectionState {
     pub next_outgoing_sequence: u16,

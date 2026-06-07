@@ -6,6 +6,7 @@ use zerocopy::FromBytes;
 use riftnet_protocol::packet::{GeneralPacketHeader, ReliabilityPacketHeader, PacketType, DisconnectPacket};
 use riftnet_protocol::ReliableConnectionState;
 use crate::connection::Connection;
+use crate::NullPipeline;
 
 pub struct ConnectionManager {
     connections: HashMap<SocketAddr, Connection>,
@@ -19,7 +20,7 @@ impl ConnectionManager {
     pub fn handle_packet<'a>(&mut self, addr: SocketAddr, data: &'a [u8]) -> Option<&'a [u8]> {
         let conn = self.connections.entry(addr).or_insert_with(|| {
             info!(client = %addr, "New connection established");
-            Connection::new(addr, true)
+            Connection::new(addr, true, Box::new(NullPipeline))
         });
         conn.last_seen = Instant::now();
 
@@ -36,7 +37,6 @@ impl ConnectionManager {
                             if is_new {
                                 return Some(&data[gen_size + rel_size..]);
                             } else {
-                                // FIX: Copy to stack to ensure alignment for the macro
                                 let sequence = rel_hdr.sequence;
                                 debug!(client = %addr, seq = sequence, "Dropped duplicate/stale reliable packet");
                             }
