@@ -28,7 +28,7 @@ members =[
 [dependencies]
 # --- Core & Async ---
 tokio = { version = "1.0", features = ["full"] }
-#riftnet-core = { path = "crates/core" }
+riftnet-core = { path = "crates/core" }
 riftnet-protocol = { path = "crates/protocol" }
 riftnet-transport = { path = "crates/transport" }
 riftnet-connection = { path = "crates/connection" }

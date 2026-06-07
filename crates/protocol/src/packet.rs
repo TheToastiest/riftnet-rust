@@ -1,3 +1,4 @@
+// packet.rs
 use zerocopy::{FromBytes, AsBytes, FromZeroes, KnownLayout};
 
 pub type Tick = u64;
@@ -51,4 +52,10 @@ pub struct DisconnectPacket {
 #[derive(Copy, Clone, Debug, FromBytes, AsBytes, FromZeroes, KnownLayout, PartialEq)]
 pub struct DataPacketHeader {
     pub uncompressed_size: u32,
+}
+
+#[repr(C, packed)]
+#[derive(Copy, Clone, Debug, FromBytes, AsBytes, FromZeroes, KnownLayout, PartialEq)]
+pub struct HandshakePacket {
+    pub session_key: [u8; 32],
 }

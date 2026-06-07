@@ -1,4 +1,4 @@
-// crates/transport/src/transporter.rs
+// transporter.rs
 use crate::reactor::NetworkReactor;
 use crate::interpolator::{Interpolator};
 use riftnet_core::RiftError;

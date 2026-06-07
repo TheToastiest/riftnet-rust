@@ -209,9 +209,12 @@ dependencies = [
 name = "riftnet-connection"
 version = "0.1.0"
 dependencies = [
+ "lz4_flex",
  "riftnet-compression",
+ "riftnet-core",
  "riftnet-encryption",
  "riftnet-protocol",
+ "ring",
  "tracing",
  "zerocopy",
 ]
@@ -244,6 +247,7 @@ version = "0.1.0"
 dependencies = [
  "io-uring",
  "riftnet-connection",
+ "riftnet-core",
  "riftnet-protocol",
  "riftnet-transport",
  "tokio",

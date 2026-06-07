@@ -1,3 +1,4 @@
+// core.rs
 use std::fmt;
 #[derive(Debug)]
 pub enum RiftError {

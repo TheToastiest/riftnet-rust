@@ -2,7 +2,8 @@ use riftnet_encryption::encryptor::Cipher;
 use riftnet_compression::compressor::{Compressor, Lz4Compressor};
 use riftnet_protocol::packet::{GeneralPacketHeader, PacketType};
 use zerocopy::AsBytes;
-
+use riftnet_connection::SecurePipeline;
+use riftnet_connection::NetworkPipeline;
 #[test]
 fn test_full_packet_pipeline() {
     // 1. Setup Data & Keys
@@ -75,3 +76,15 @@ fn test_pipeline_rejects_tampering() {
         "AEAD Cipher MUST fail to decrypt if the AAD (headers) have been altered!"
     );
 }
+    #[test]
+    fn test_pipeline_roundtrip() {
+        let key = [0x42; 32];
+        let pipeline = SecurePipeline::new(key);
+        let data = b"test_payload";
+        let nonce = 101;
+
+        let encrypted = pipeline.process(data, nonce);
+        let decrypted = pipeline.inverse_process(&encrypted, nonce).unwrap();
+
+        assert_eq!(data.to_vec(), decrypted);
+    }

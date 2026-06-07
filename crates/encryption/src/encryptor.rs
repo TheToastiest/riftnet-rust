@@ -1,3 +1,4 @@
+// encryptor.rs
 use ring::aead::{self, LessSafeKey, UnboundKey, Nonce, Aad};
 use riftnet_core::RiftError;
 

@@ -1,41 +1,63 @@
-// server.rs
-use riftnet_transport::{TokioReactor, NetworkReactor};
+// riftnet-rust\bin\server.rs
+
+use riftnet_transport::{TokioReactor, Transporter}; // Removed unused NetworkReactor
 use riftnet_connection::manager::ConnectionManager;
 use riftnet_protocol::packet::{GeneralPacketHeader, SnapshotHeader, InputPacket, PacketType};
+use riftnet_core::threading::TaskThreadPool;
+use riftnet_transport::interpolator::{Interpolatable, Snapshot};
 use std::net::SocketAddr;
-use std::collections::{HashMap, BTreeMap, HashSet, hash_map::DefaultHasher};
+use std::collections::{HashMap, BTreeMap, hash_map::DefaultHasher};
+// Removed unused Instant
 use std::hash::Hasher;
 use tokio::time::{interval, Duration, MissedTickBehavior};
-use tracing::{info, Level};
+use tracing::{info, debug, Level, warn};
 use tracing_subscriber::FmtSubscriber;
 use zerocopy::{FromBytes, AsBytes};
+use riftnet_core::FixedVec3::FixedVec3;
 
 #[derive(Clone, Debug)]
 pub struct WorldState {
-    pub positions: Vec<[f32; 3]>,
+    pub positions: Vec<FixedVec3>,
 }
 
 impl WorldState {
     pub fn calculate_hash(&self) -> u64 {
         let mut hasher = DefaultHasher::new();
         for pos in &self.positions {
-            for v in pos { hasher.write_u32(v.to_bits()); }
+            hasher.write_i32(pos.x);
+            hasher.write_i32(pos.y);
+            hasher.write_i32(pos.z);
         }
         hasher.finish()
     }
 
     pub fn step_physics(&mut self, input: u32) {
+        // Enforcing Left-Handed Y-up coordinates: X=Right, Y=Up, Z=Forward
+        // Using FixedVec3::SCALE (1000) means 10 = 10mm or 0.01 units
         if (input & 0x01) != 0 {
-            self.positions[0][0] += 0.01;
+            self.positions[0].x += 10; // Moving Positive X deterministically
         }
     }
 }
 
-// NEW: Session state to hold our jitter buffer
+// Architectural Wiring: Lerp the integers for the renderer without bleeding
+// floats back into the authoritative state buffer.
+impl Interpolatable for WorldState {
+    fn lerp(&self, other: &Self, factor: f32) -> Self {
+        let mut new_pos = Vec::with_capacity(self.positions.len());
+        for (a, b) in self.positions.iter().zip(other.positions.iter()) {
+            new_pos.push(FixedVec3 {
+                x: a.x + ((b.x - a.x) as f32 * factor).round() as i32,
+                y: a.y + ((b.y - a.y) as f32 * factor).round() as i32,
+                z: a.z + ((b.z - a.z) as f32 * factor).round() as i32,
+            });
+        }
+        Self { positions: new_pos }
+    }
+}
+
 struct ClientSession {
-    /// BTreeMap keeps ticks sorted chronologically: Tick -> Input Bitmask
     input_buffer: BTreeMap<u64, u32>,
-    /// The input applied in the previous tick (used for extrapolation)
     last_known_input: u32,
     latest_input_tick: u64,
 }
@@ -49,9 +71,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing::subscriber::set_global_default(subscriber).expect("Setting default subscriber failed");
 
     let addr: SocketAddr = "0.0.0.0:8080".parse()?;
-    let mut reactor = TokioReactor::new(addr).await?;
+
+    // 1. Initialize the Core Infrastructure
+    let reactor = TokioReactor::new(addr).await?;
+    let mut transporter = Transporter::<WorldState, TokioReactor>::new(reactor, 128);
     let mut manager = ConnectionManager::new();
-    let mut world = WorldState { positions: vec![[0.0, 0.0, 0.0]] };
+
+    // Pre-warm the thread pool for authoritative simulation tasks
+    let _thread_pool = TaskThreadPool::new(4);
+
+    let mut world = WorldState { positions: vec![FixedVec3 { x: 0, y: 0, z: 0 }] };
     let mut current_tick: u64 = 0;
     let mut client_sessions: HashMap<SocketAddr, ClientSession> = HashMap::new();
 
@@ -64,21 +93,36 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ticker.tick().await;
         current_tick += 1;
 
-        // 1. Ingest packets into jitter buffer
-        if let Ok(packets) = reactor.poll_packets() {
+        // 2. Poll the abstracted Transporter
+        if let Ok(packets) = transporter.poll() {
             for (packet, sender) in packets {
                 if let Some(app_data) = manager.handle_packet(sender, &packet) {
-                    if let Some(gen_hdr) = GeneralPacketHeader::read_from_prefix(app_data) {
+                    if let Some(gen_hdr) = GeneralPacketHeader::read_from_prefix(&app_data) {
                         if gen_hdr.packet_type == PacketType::Input as u8 {
                             let offset = std::mem::size_of::<GeneralPacketHeader>();
-                            if let Some(input_pkt) = InputPacket::read_from_prefix(&app_data[offset..]) {
-                                let session = client_sessions.entry(sender).or_insert(ClientSession {
-                                    input_buffer: BTreeMap::new(),
-                                    last_known_input: 0,
-                                    latest_input_tick: 0,
-                                });
-                                session.input_buffer.insert(input_pkt.tick, input_pkt.input_bitmask);
-                                session.latest_input_tick = input_pkt.tick; // Capture latest
+
+                            // HARDENING: Check bounds before assuming packet size
+                            if app_data.len() >= offset + std::mem::size_of::<InputPacket>() {
+                                #[repr(C, align(8))]
+                                struct AlignedBuf([u8; 32]);
+                                let mut buf = AlignedBuf([0; 32]);
+                                let pkt_size = std::mem::size_of::<InputPacket>();
+
+                                buf.0[..pkt_size].copy_from_slice(&app_data[offset..offset + pkt_size]);
+
+                                if let Some(input_pkt) = InputPacket::read_from_prefix(&buf.0[..pkt_size]) {
+                                    let session = client_sessions.entry(sender).or_insert(ClientSession {
+                                        input_buffer: std::collections::BTreeMap::new(),
+                                        last_known_input: 0,
+                                        latest_input_tick: 0,
+                                    });
+                                    session.input_buffer.insert(input_pkt.tick, input_pkt.input_bitmask);
+                                    session.latest_input_tick = input_pkt.tick;
+                                } else {
+                                    warn!("SERVER: zerocopy failed to parse InputPacket");
+                                }
+                            } else {
+                                warn!("SERVER: Dropped undersized input packet");
                             }
                         }
                     }
@@ -86,43 +130,91 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
 
-        // 2. Deterministic Tick Execution
+        for (addr, _conn_state) in manager.get_active_connections() {
+            client_sessions.entry(*addr).or_insert(ClientSession {
+                input_buffer: BTreeMap::new(),
+                last_known_input: 0,
+                latest_input_tick: 0,
+            });
+        }
+
+        // 3. Deterministic Tick Execution
         let mut inputs_this_tick = 0;
         for (_, session) in client_sessions.iter_mut() {
-            // Apply exact input or extrapolate last known
             if let Some(input) = session.input_buffer.remove(&current_tick) {
                 session.last_known_input = input;
             }
             inputs_this_tick |= session.last_known_input;
-            // Purge ancient data
             session.input_buffer.retain(|&t, _| t > current_tick);
         }
 
         world.step_physics(inputs_this_tick);
         let hash = world.calculate_hash();
 
-        // 3. Broadcast to all active sessions
+        // 4. Record state to the server's internal Interpolator history
+        transporter.interpolator.push_snapshot(Snapshot {
+            tick: current_tick,
+            state: world.clone(),
+        });
+
+        // 5. Queue Broadcasts
+        // 5. Queue Broadcasts
         for (addr, session) in client_sessions.iter_mut() {
-            // Construct the unique header for THIS client
-            let snap_hdr = SnapshotHeader {
-                tick: current_tick,
-                state_hash: hash,
-                last_input_tick: session.latest_input_tick,
-            };
+            // Check if the pipeline is actually secure before broadcasting state
+            if let Some(conn) = manager.get_active_connections().get(addr) {
+                // Assuming we can check if the pipeline is no longer the static POC key
+                // Alternatively, add a `is_handshake_complete` bool to your Connection struct
+                let snap_hdr = SnapshotHeader {
+                    tick: current_tick,
+                    state_hash: hash,
+                    last_input_tick: session.latest_input_tick,
+                };
 
-            // Construct buffer for THIS client
-            let mut out_buffer = [
-                GeneralPacketHeader { packet_type: PacketType::Snapshot as u8 }.as_bytes(),
-                snap_hdr.as_bytes()
-            ].concat();
+                let mut out_buffer = [
+                    GeneralPacketHeader { packet_type: PacketType::Snapshot as u8 }.as_bytes(),
+                    snap_hdr.as_bytes()
+                ].concat();
 
-            for pos in &world.positions {
-                for v in pos {
-                    out_buffer.extend_from_slice(&v.to_le_bytes());
+                for pos in &world.positions {
+                    out_buffer.extend_from_slice(&pos.x.to_le_bytes());
+                    out_buffer.extend_from_slice(&pos.y.to_le_bytes());
+                    out_buffer.extend_from_slice(&pos.z.to_le_bytes());
                 }
-            }
 
-            let _ = reactor.send_packet(&out_buffer, *addr);
+                manager.send_to_client(*addr, &out_buffer, false, true);
+            }
+        }
+
+        // 6. Memory Cleanup & Strict Eviction
+        let eviction_timeout = Duration::from_secs(5);
+        manager.evict_stale_connections(eviction_timeout);
+
+        let active_addrs: std::collections::HashSet<_> = manager.get_active_connections().keys().copied().collect();
+        client_sessions.retain(|addr, _| {
+            let is_active = active_addrs.contains(addr);
+            if !is_active {
+                info!(client = %addr, "SERVER: Purging session data for evicted connection.");
+            }
+            is_active
+        });
+
+        manager.flush_all(|wire_bytes, target_addr| {
+            debug!(bytes = wire_bytes.len(), target = %target_addr, "SERVER: Flushing packet to socket");
+            let _ = transporter.send(wire_bytes, target_addr);
+        });
+
+        // 7. Server Telemetry Pulse
+        if current_tick % 60 == 0 {
+            let active_clients = client_sessions.len();
+            let total_buffered_inputs: usize = client_sessions.values().map(|s| s.input_buffer.len()).sum();
+
+            info!(
+                srv_tick = current_tick,
+                hash = hash,
+                clients = active_clients,
+                buffered_inputs = total_buffered_inputs,
+                "Server Telemetry Pulse"
+            );
         }
     }
 }

@@ -1,3 +1,4 @@
+// compressor.rs
 use riftnet_core::RiftError;
 
 pub trait Compressor {

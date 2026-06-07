@@ -7,6 +7,8 @@ edition = "2021"
 riftnet-protocol = { path = "../protocol" }
 riftnet-encryption = { path = "../encryption" }
 riftnet-compression = { path = "../compression" }
-
+riftnet-core = { path = "../core" }
 zerocopy = { version = "0.7", features = ["derive"] }
 tracing = "0.1.44"
+ring = "0.17.14"
+lz4_flex = "0.11.6"
