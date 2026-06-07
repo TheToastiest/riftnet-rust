@@ -4,11 +4,9 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-#riftnet-core = { path = "../core" }
 riftnet-protocol = { path = "../protocol" }
 riftnet-encryption = { path = "../encryption" }
 riftnet-compression = { path = "../compression" }
 
-#riftnet-transport = { path = "../transport" }
 zerocopy = { version = "0.7", features = ["derive"] }
 tracing = "0.1.44"

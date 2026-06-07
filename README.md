@@ -6,7 +6,12 @@ RiftNet-Rust is a high-performance, 100% safe Rust networking and state-reconcil
 2. **Architectural Proof:** Demonstrating that Rust's ownership model can manage low-level network buffers as effectively as C++ while eliminating entire classes of memory-safety bugs.
 3. **Collaboration Baseline:** A collaborative baseline for potential integration into the SPAWN Engine ecosystem.
 
-### Key Capabilities
+### Key Capabilities:
 - **Safe-Rust Networking:** Uses `tokio` for I/O and `zerocopy` for wire-level performance; zero `unsafe` blocks.
 - **Panic-Isolated Simulation:** Uses `catch_unwind` and lock-poisoning recovery in the thread pool to ensure the networking reactor remains operational even if the simulation encounters a fatal error.
 - **Clock Synchronization:** Implements a PI-controller (Proportional-Integral) for dynamic drift correction, tested to maintain synchronization across rural, high-jitter internet links.
+
+### How to Test:
+- **cargo run --bin client --release
+- **cargo run --bin client_swarm --release (for multiple client connections)
+- **carbo run --bin server --release (ensure you change the ip address in bin\client.rs)
