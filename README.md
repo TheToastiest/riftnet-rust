@@ -14,4 +14,4 @@ RiftNet-Rust is a high-performance, 100% safe Rust networking and state-reconcil
 ### How to Test:
 - **cargo run --bin client --release
 - **cargo run --bin client_swarm --release (for multiple client connections)
-- **carbo run --bin server --release (ensure you change the ip address in bin\client.rs)
+- **cargo run --bin server --release (ensure you change the ip address in bin\client.rs)
