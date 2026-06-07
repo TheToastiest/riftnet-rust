@@ -3,11 +3,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 use tokio::sync::oneshot;
+use crate::RiftTask;
 
-// A type alias for a trait object representing a callable task that can be sent across threads
 type Job = Box<dyn FnOnce() + Send + 'static>;
 
-/// Shared state accessed by both the pool interface and the worker threads
 struct PoolState {
     tasks: Mutex<VecDeque<Job>>,
     condvar: Condvar,
@@ -16,21 +15,14 @@ struct PoolState {
 }
 
 pub struct TaskThreadPool {
-    // Option is used so we can take ownership of the handle during Drop/stop
     workers: Vec<Option<thread::JoinHandle<()>>>,
     state: Arc<PoolState>,
     thread_count: usize,
 }
 
 impl TaskThreadPool {
-    /// Initializes the thread pool. Defaults to hardware concurrency if 0 is provided.
     pub fn new(num_threads: usize) -> Self {
-        let thread_count = if num_threads == 0 {
-            std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1)
-        } else {
-            num_threads
-        };
-
+        let thread_count = num_threads.max(1); // Ensure at least 1
         let state = Arc::new(PoolState {
             tasks: Mutex::new(VecDeque::new()),
             condvar: Condvar::new(),
@@ -39,82 +31,53 @@ impl TaskThreadPool {
         });
 
         let mut workers = Vec::with_capacity(thread_count);
-
         for i in 0..thread_count {
             let state_clone = Arc::clone(&state);
-
-            // Rust's thread builder natively handles cross-platform thread naming
-            let builder = thread::Builder::new().name(format!("PoolWorker-{}", i));
-
-            let handle = builder
-                .spawn(move || {
-                    Self::worker_loop(state_clone);
-                })
-                .expect("Failed to create OS thread");
-
+            let handle = thread::Builder::new()
+                .name(format!("RiftWorker-{}", i))
+                .spawn(move || Self::worker_loop(state_clone))
+                .expect("Critical: Failed to spawn OS thread");
             workers.push(Some(handle));
         }
 
-        Self {
-            workers,
-            state,
-            thread_count,
-        }
+        Self { workers, state, thread_count }
     }
 
-    /// The core worker loop, detached from the main struct to prevent lifetime entanglement
     fn worker_loop(state: Arc<PoolState>) {
         loop {
             let job = {
-                let mut tasks = state.tasks.lock().unwrap();
+                // Use match to handle potential Mutex poisoning gracefully
+                let mut tasks = match state.tasks.lock() {
+                    Ok(guard) => guard,
+                    Err(poisoned) => poisoned.into_inner(), // Recover even if poisoned
+                };
 
-                // Equivalent to the C++ condition_.wait(lock, predicate)
                 loop {
-                    // Exit condition: Stopped and queue is fully drained
-                    if state.stop.load(Ordering::Acquire) && tasks.is_empty() {
-                        return;
-                    }
-
-                    // Execution condition: Not paused and queue has work
+                    if state.stop.load(Ordering::Acquire) && tasks.is_empty() { return; }
                     if !state.paused.load(Ordering::Acquire) && !tasks.is_empty() {
-                        break tasks.pop_front().unwrap();
+                        break tasks.pop_front().expect("Queue check failed");
                     }
-
-                    // Sleep and release lock until notified
-                    tasks = state.condvar.wait(tasks).unwrap();
+                    tasks = state.condvar.wait(tasks).unwrap_or_else(|e| e.into_inner());
                 }
-            }; // Mutex lock is dropped here naturally
+            };
 
-            // Execute the job completely outside the lock
-            job();
+            // Execute job wrapped in catch_unwind to prevent worker thread death
+            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(job));
         }
     }
 
-    /// Enqueues a task and returns a Future that resolves when the task completes.
-    pub fn enqueue<F, R>(&self, f: F) -> oneshot::Receiver<R>
-    where
-        F: FnOnce() -> R + Send + 'static,
-        R: Send + 'static,
-    {
-        if self.state.stop.load(Ordering::Acquire) {
-            panic!("enqueue called on stopped TaskThreadPool");
-        }
-
-        // Create a one-time communication channel
+    pub fn enqueue<T>(&self, task: T) -> oneshot::Receiver<T::Output>
+    where T: RiftTask {
         let (sender, receiver) = oneshot::channel();
-
-        // Wrap the closure and the sender in a Boxed Job
         let job = Box::new(move || {
-            let result = f();
-            // We ignore send errors; if the caller dropped the receiver, they just don't care about the result
+            let result = task.execute();
             let _ = sender.send(result);
         });
 
         {
-            let mut tasks = self.state.tasks.lock().unwrap();
+            let mut tasks = self.state.tasks.lock().unwrap_or_else(|e| e.into_inner());
             tasks.push_back(job);
         }
-
         self.state.condvar.notify_one();
         receiver
     }

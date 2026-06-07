@@ -11,6 +11,10 @@ path = "bin/server.rs"
 name = "client"
 path = "bin/client.rs"
 
+[[bin]]
+name = "client_swarm"
+path = "bin/client_swarm.rs"
+
 [workspace]
 members =[
     "crates/core",

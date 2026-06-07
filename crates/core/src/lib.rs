@@ -1,7 +1,8 @@
-// This tells Rust to include the contents of core.rs as a module
-pub mod core;
-mod threading;
+// crates/core/src/lib.rs
 
-// Re-export items if you want them accessible directly from 'core'
-pub use crate::core::*;
-pub use crate::threading::*;
+pub mod core;
+pub mod threading;
+
+// EXPORT these so other crates can see them at the root
+pub use crate::core::{RiftError, Tick, ConnId, RiftTask};
+pub use crate::threading::TaskThreadPool;

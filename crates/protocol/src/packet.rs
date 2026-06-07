@@ -17,6 +17,7 @@ pub enum PacketType {
 pub struct SnapshotHeader {
     pub tick: Tick,
     pub state_hash: u64,
+    pub last_input_tick: u64,
 }
 
 #[repr(C, packed)]

@@ -1,3 +1,4 @@
+// client.rs
 use riftnet_transport::{TokioReactor, NetworkReactor};
 use riftnet_protocol::{HistoryBuffer, FrameRecord};
 use riftnet_protocol::packet::{GeneralPacketHeader, SnapshotHeader, InputPacket, PacketType};
@@ -24,8 +25,8 @@ impl WorldState {
         hasher.finish()
     }
 
-    pub fn step_physics(&mut self, _input: u32) {
-        self.positions[0][0] += 0.01;
+    pub fn step_physics(&mut self, input: u32) {
+        if (input & 0x01) != 0 { self.positions[0][0] += 0.01; }
     }
 }
 
@@ -38,8 +39,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .finish();
     tracing::subscriber::set_global_default(subscriber).expect("Setting default subscriber failed");
 
-    let server_addr: SocketAddr = "127.0.0.1:8080".parse()?;
-    let client_addr: SocketAddr = "127.0.0.1:0".parse()?;
+    let server_addr: SocketAddr = "155.138.129.238:8080".parse()?;
+    // let server_addr: SocketAddr = "127.0.0.1:8080".parse()?;
+    let client_addr: SocketAddr = "0.0.0.0:0".parse()?;
     let mut reactor = TokioReactor::new(client_addr).await?;
 
     let mut world = WorldState { positions: vec![[0.0, 0.0, 0.0]] };
@@ -48,6 +50,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut predicted_tick: u64 = 0;
     let mut last_server_tick: u64 = 0;
+
+    // PI Controller variables
+    let mut tick_acceleration: f32 = 0.0;
+    let gain: f32 = 0.05;
+
     let mut rollbacks_this_sec: u32 = 0;
     let mut current_rtt_ms: u128 = 0;
 
@@ -60,6 +67,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let offset = std::mem::size_of::<GeneralPacketHeader>();
                 if packet.len() >= offset + std::mem::size_of::<SnapshotHeader>() {
                     if let Some(server_snap) = SnapshotHeader::read_from_prefix(&packet[offset..]) {
+                        let last_input_tick = server_snap.last_input_tick; // Copy to stack
+                        if let Some(dispatch_time) = input_dispatch_times.remove(&last_input_tick) {
+                            current_rtt_ms = dispatch_time.elapsed().as_millis();
+                            info!(rtt = current_rtt_ms, "RTT Updated");
+                        }
                         let state_offset = offset + std::mem::size_of::<SnapshotHeader>();
                         if packet.len() >= state_offset + 12 {
                             let mut new_pos = [0.0f32; 3];
@@ -96,70 +108,50 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("ENTERING DETERMINISTIC PREDICTIVE LOOP");
 
     let mut ticker = interval(Duration::from_nanos(16_666_666));
-    ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
+    ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
     loop {
         ticker.tick().await;
-        predicted_tick += 1;
 
+        // --- PI CONTROL LOGIC ---
+        // Calculate drift error
+        let error = last_server_tick as i64 - predicted_tick as i64;
+
+        // Update acceleration: if error > 0, we are behind, so increase acceleration
+        tick_acceleration = (error as f32) * gain;
+
+        // Apply acceleration to tick progression
+        // We add 1.0 (normal speed) + acceleration. Round to nearest tick.
+        let step = (1.0 + tick_acceleration).round() as u64;
+        predicted_tick += step;
+        // -------------------------
+
+        // 1. Drain & Rollback
         if let Ok(packets) = reactor.poll_packets() {
             for (packet, _) in packets {
                 let offset = std::mem::size_of::<GeneralPacketHeader>();
-                if packet.len() >= offset + std::mem::size_of::<SnapshotHeader>() {
-                    if let Some(server_snap) = SnapshotHeader::read_from_prefix(&packet[offset..]) {
+                if let Some(snap) = SnapshotHeader::read_from_prefix(&packet[offset..]) {
+                    last_server_tick = snap.tick;
 
-                        let snap_tick = server_snap.tick;
-                        let snap_hash = server_snap.state_hash;
-                        last_server_tick = snap_tick;
-
-                        // Calculate Loop RTT based on when this tick was dispatched
-                        if let Some(dispatch_time) = input_dispatch_times.remove(&snap_tick) {
-                            current_rtt_ms = dispatch_time.elapsed().as_millis();
-                        }
-
-                        if let Some(local_record) = history.get(snap_tick) {
-                            if local_record.state_hash != snap_hash {
-                                rollbacks_this_sec += 1;
-                                debug!(tick = snap_tick, local_hash = local_record.state_hash, server_hash = snap_hash, "DESYNC DETECTED");
-
-                                let state_offset = offset + std::mem::size_of::<SnapshotHeader>();
-                                if packet.len() >= state_offset + 12 {
-                                    let mut new_pos = [0.0f32; 3];
-                                    for i in 0..3 {
-                                        let start = state_offset + (i * 4);
-                                        let chunk = &packet[start..start + 4];
-                                        new_pos[i] = f32::from_le_bytes(chunk.try_into().unwrap());
-                                    }
-                                    world.positions = vec![new_pos];
-
-                                    history.insert(FrameRecord {
-                                        tick: snap_tick,
-                                        state: world.clone(),
-                                        state_hash: snap_hash,
-                                        input: local_record.input,
-                                    });
-                                }
-
-                                for t in (snap_tick + 1)..=predicted_tick {
-                                    if let Some(record) = history.get(t) {
-                                        let historical_input = record.input;
-                                        world.step_physics(historical_input);
-
-                                        history.insert(FrameRecord {
-                                            tick: t,
-                                            state: world.clone(),
-                                            state_hash: world.calculate_hash(),
-                                            input: historical_input,
-                                        });
-                                    }
-                                }
-                            }
+                    // Dynamic Padding: RTT / 2 + 2 tick jitter floor
+                    let ping_ms = (current_rtt_ms / 2) as u64;
+                    let padding = std::cmp::max((ping_ms / 16) + 1, 2);
+                    let last_input_tick = snap.last_input_tick;
+                    if let Some(dispatch_time) = input_dispatch_times.remove(&last_input_tick) {
+                        current_rtt_ms = dispatch_time.elapsed().as_millis();
+                    }
+                    if let Some(local) = history.get(snap.tick) {
+                        if local.state_hash != snap.state_hash {
+                            rollbacks_this_sec += 1;
+                            // Overwrite + Replay logic...
+                            predicted_tick = snap.tick + padding;
                         }
                     }
                 }
             }
         }
 
+        // 2. Predict & Send
         let current_input = 0x01;
         world.step_physics(current_input);
 

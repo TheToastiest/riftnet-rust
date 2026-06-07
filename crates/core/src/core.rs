@@ -17,3 +17,8 @@ impl fmt::Display for RiftError {
 impl std::error::Error for RiftError {}
 pub type ConnId = u64;
 pub type Tick = u64;
+
+pub trait RiftTask: Send + 'static {
+    type Output: Send + 'static;
+    fn execute(self) -> Self::Output;
+}
