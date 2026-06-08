@@ -69,6 +69,7 @@ pub struct Connection {
     pub pipeline: Box<dyn NetworkPipeline + Send>,
     // ARCHITECTURAL FIX: Defer the pipeline swap until after the flush
     pub pending_pipeline_swap: Option<Box<dyn NetworkPipeline + Send>>,
+    pub is_authenticated: bool,
 }
 
 impl Connection {
@@ -90,6 +91,7 @@ impl Connection {
             max_pending_bytes: 1024 * 1024,
             pipeline,
             pending_pipeline_swap: None,
+            is_authenticated: false,
         }
     }
 

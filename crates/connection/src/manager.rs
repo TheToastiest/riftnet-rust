@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::time::Instant;
-use tracing::{info, warn};
+use tracing::{info, warn, debug};
 use zerocopy::FromBytes;
 use riftnet_protocol::packet::{GeneralPacketHeader, ReliabilityPacketHeader, PacketType, DisconnectPacket, HandshakePacket};
 use riftnet_protocol::ReliableConnectionState;
@@ -65,16 +65,24 @@ impl ConnectionManager {
 
                         let payload_offset = gen_size + rel_size;
                         let nonce = rel_hdr.sequence as u64;
-
+                        if !conn.is_authenticated {
+                            // Only allow handshake/reliable packets during authentication
+                            let gen_hdr = GeneralPacketHeader::read_from_prefix(data)?;
+                            if gen_hdr.packet_type != PacketType::Reliable as u8 {
+                                return None; // Silently drop non-handshake packets
+                            }
+                        }
                         // FIX: Handle Result instead of Option
                         match conn.pipeline.inverse_process(&data[payload_offset..], nonce) {
                             Ok(decrypted) => {
+
                                 if let Some(inner_hdr) = GeneralPacketHeader::read_from_prefix(&decrypted) {
                                     if inner_hdr.packet_type == PacketType::Reliable as u8 {
                                         let hs_offset = std::mem::size_of::<GeneralPacketHeader>();
                                         if decrypted.len() >= hs_offset + std::mem::size_of::<HandshakePacket>() {
                                             if let Some(hs) = HandshakePacket::read_from_prefix(&decrypted[hs_offset..]) {
                                                 info!(server = %addr, "CLIENT: Received Secure Handshake Key.");
+                                                conn.is_authenticated = true;
                                                 conn.pipeline = Box::new(SecurePipeline::new(hs.session_key));
                                                 return None;
                                             }
@@ -84,13 +92,14 @@ impl ConnectionManager {
                                 return Some(decrypted);
                             }
                             Err(e) => {
-                                warn!(client = %addr, error = ?e, "Reliable packet decryption failed");
+                                debug!(client = %addr, error = ?e, "Reliable packet decryption failed");
                                 return None;
                             }
                         }
                     }
                 }
             }
+
             t if t == PacketType::Input as u8 || t == PacketType::Snapshot as u8 => {
                 if data.len() < gen_size + 8 { return None; }
                 let mut nonce_bytes = [0u8; 8];

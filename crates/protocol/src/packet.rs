@@ -33,8 +33,8 @@ pub struct GeneralPacketHeader {
     pub packet_type: u8,
 }
 
-#[repr(C, packed)]
-#[derive(Copy, Clone, Debug, FromBytes, AsBytes, FromZeroes, KnownLayout, PartialEq)]
+#[repr(C, packed)] // Ensure this matches exactly on both ends
+#[derive(Copy, Clone, Debug, FromZeroes, FromBytes, AsBytes, KnownLayout)]
 pub struct ReliabilityPacketHeader {
     pub sequence: u16,
     pub ack: u16,

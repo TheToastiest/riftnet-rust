@@ -56,7 +56,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let subscriber = FmtSubscriber::builder().with_max_level(tracing::Level::INFO).with_target(false).finish();
     tracing::subscriber::set_global_default(subscriber).expect("Setting default subscriber failed");
 
-    let server_addr: SocketAddr = "155.138.129.238:8080".parse()?;
+    // let server_addr: SocketAddr = "155.138.129.238:8080".parse()?;
+    let server_addr: SocketAddr = "127.0.0.1:8080".parse()?;
     let client_addr: SocketAddr = "0.0.0.0:0".parse()?;
     let mut last_ema: u128 = 0;
     let reactor = TokioReactor::new(client_addr).await?;
@@ -71,7 +72,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut predicted_tick: u64 = 0;
     let mut last_server_tick: u64 = 0;
     let mut rollbacks_this_sec: u32 = 0;
-    let current_rtt_ms: u128 = 0;
+    let mut current_rtt_ms: u128 = 0;
     let mut last_seen_packet_time = Instant::now();
 
     info!(target_server = %server_addr, "CLIENT INITIALIZED - AWAITING SYNC");
@@ -127,7 +128,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         if gen_hdr.packet_type == PacketType::Snapshot as u8 {
                             let state_offset = std::mem::size_of::<GeneralPacketHeader>() + std::mem::size_of::<SnapshotHeader>();
                             if let Some(snap) = SnapshotHeader::read_from_prefix(&app_data[std::mem::size_of::<GeneralPacketHeader>()..state_offset]) {
+                                let last_input_tick = snap.last_input_tick;
                                 last_server_tick = snap.tick;
+                                if let Some(sent_time) = input_dispatch_times.remove(&last_input_tick) {
+                                    current_rtt_ms = sent_time.elapsed().as_millis();
+                                }
                                 let new_pos = FixedVec3 {
                                     x: i32::from_le_bytes(app_data[state_offset..state_offset + 4].try_into().unwrap()),
                                     y: i32::from_le_bytes(app_data[state_offset + 4..state_offset + 8].try_into().unwrap()),

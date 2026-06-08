@@ -123,8 +123,11 @@ impl ReliableConnectionState {
         // --- 4. Update Receive Window ---
         if Self::is_sequence_more_recent(header.sequence, self.highest_received_sequence) {
             let diff = header.sequence.wrapping_sub(self.highest_received_sequence);
-            self.received_sequence_bitfield = self.received_sequence_bitfield.checked_shl(diff as u32).unwrap_or(0);
-            self.received_sequence_bitfield |= 1;
+            if diff < 32 {
+                self.received_sequence_bitfield = (self.received_sequence_bitfield << diff) | 1;
+            } else {
+                self.received_sequence_bitfield = 1;
+            }
             self.highest_received_sequence = header.sequence;
         } else {
             let diff = self.highest_received_sequence.wrapping_sub(header.sequence);
