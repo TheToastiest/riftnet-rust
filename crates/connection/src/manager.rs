@@ -72,7 +72,6 @@ impl ConnectionManager {
                                 return None; // Silently drop non-handshake packets
                             }
                         }
-                        // FIX: Handle Result instead of Option
                         match conn.pipeline.inverse_process(&data[payload_offset..], nonce) {
                             Ok(decrypted) => {
 
@@ -106,7 +105,6 @@ impl ConnectionManager {
                 nonce_bytes.copy_from_slice(&data[gen_size..gen_size + 8]);
                 let nonce = u64::from_le_bytes(nonce_bytes);
 
-                // FIX: Handle Result instead of Option
                 match conn.pipeline.inverse_process(&data[gen_size + 8..], nonce) {
                     Ok(decrypted) => {
                         let mut full_packet = gen_hdr.as_bytes().to_vec();
