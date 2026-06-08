@@ -2,8 +2,8 @@
 
 pub mod core;
 pub mod threading;
-pub mod FixedVec3;
+pub mod fixed_vec3;
 
 pub use crate::core::{RiftError, Tick, ConnId, RiftTask};
 pub use crate::threading::TaskThreadPool;
-pub use crate::FixedVec3::*;
+pub use crate::fixed_vec3::*;

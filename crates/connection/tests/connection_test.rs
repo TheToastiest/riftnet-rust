@@ -45,7 +45,8 @@ fn test_secure_packet_routing() {
     let rel_hdr_1 = ReliabilityPacketHeader { sequence: seq_1, ack: 0, ack_bitfield: 0 };
 
     // Encrypt and compress using the sequence number as the exact nonce
-    let encrypted_payload_1 = sender_pipeline.process(mock_payload, seq_1 as u64);
+    let encrypted_payload_1 = sender_pipeline.process(mock_payload, seq_1 as u64)
+        .expect("Sender encryption failed");
 
     let mut data_1 = Vec::new();
     data_1.extend_from_slice(gen_hdr.as_bytes());
@@ -63,7 +64,8 @@ fn test_secure_packet_routing() {
     // ---------------------------------------------------------
     let seq_2 = 2;
     let rel_hdr_2 = ReliabilityPacketHeader { sequence: seq_2, ack: 0, ack_bitfield: 0 };
-    let encrypted_payload_2 = sender_pipeline.process(mock_payload, seq_2 as u64);
+    let encrypted_payload_2 = sender_pipeline.process(mock_payload, seq_2 as u64)
+        .expect("Sender encryption failed");
 
     let mut data_2 = Vec::new();
     data_2.extend_from_slice(gen_hdr.as_bytes());

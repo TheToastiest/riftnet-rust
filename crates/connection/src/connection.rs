@@ -1,25 +1,24 @@
 use std::net::SocketAddr;
 use std::time::Instant;
 use std::collections::VecDeque;
-use riftnet_protocol::{ReliableConnectionState, ReliabilityPacketHeader, GeneralPacketHeader, protocol, PacketType};
+use riftnet_protocol::{ReliableConnectionState, ReliabilityPacketHeader, GeneralPacketHeader, PacketType};
 use zerocopy::AsBytes;
-
+use riftnet_core::RiftError;
 pub trait NetworkPipeline {
-    fn process(&self, data: &[u8], nonce: u64) -> Vec<u8>;
-    fn inverse_process(&self, data: &[u8], nonce: u64) -> Option<Vec<u8>>;
+    fn process(&self, data: &[u8], nonce: u64) -> Result<Vec<u8>, RiftError>;
+    fn inverse_process(&self, data: &[u8], nonce: u64) -> Result<Vec<u8>, RiftError>;
 }
 
 pub struct NullPipeline;
 
 impl NetworkPipeline for NullPipeline {
-    fn process(&self, data: &[u8], _nonce: u64) -> Vec<u8> {
-        data.to_vec()
+    fn process(&self, data: &[u8], _nonce: u64) -> Result<Vec<u8>, RiftError> {
+        Ok(data.to_vec())
     }
-    fn inverse_process(&self, data: &[u8], _nonce: u64) -> Option<Vec<u8>> {
-        Some(data.to_vec())
+    fn inverse_process(&self, data: &[u8], _nonce: u64) -> Result<Vec<u8>, RiftError> {
+        Ok(data.to_vec())
     }
 }
-
 pub struct AntiReplayWindow {
     pub highest_nonce: u64,
     pub window: u64,
@@ -117,7 +116,6 @@ impl Connection {
                 let seq = self.state.next_outgoing_sequence;
                 self.state.next_outgoing_sequence = self.state.next_outgoing_sequence.wrapping_add(1);
 
-                // CRITICAL FIX: Pull the actual ACK state to tell the server we got the Handshake
                 let rel_hdr = ReliabilityPacketHeader {
                     sequence: seq,
                     ack: self.state.highest_received_sequence,
@@ -125,49 +123,61 @@ impl Connection {
                 };
 
                 let gen_hdr = GeneralPacketHeader { packet_type: PacketType::Reliable as u8 };
-                let encrypted_payload = self.pipeline.process(&ps.data, seq as u64);
 
-                let mut out = Vec::new();
-                out.extend_from_slice(gen_hdr.as_bytes());
-                out.extend_from_slice(rel_hdr.as_bytes());
-                out.extend_from_slice(&encrypted_payload);
+                // Handle the Result from the pipeline
+                match self.pipeline.process(&ps.data, seq as u64) {
+                    Ok(encrypted_payload) => {
+                        let mut out = Vec::new();
+                        out.extend_from_slice(gen_hdr.as_bytes());
+                        out.extend_from_slice(rel_hdr.as_bytes());
+                        out.extend_from_slice(&encrypted_payload);
 
-                self.state.unacknowledged_packets.push(riftnet_protocol::protocol::UnackedPacket {
-                    sequence: seq,
-                    time_sent: now,
-                    data: out.clone(),
-                    retries: 0,
-                });
-                out
+                        self.state.unacknowledged_packets.push(riftnet_protocol::protocol::UnackedPacket {
+                            sequence: seq,
+                            time_sent: now,
+                            data: out.clone(),
+                            retries: 0,
+                        });
+                        out
+                    }
+                    Err(e) => {
+                        eprintln!("Pipeline process failed: {:?}", e);
+                        continue; // Drop packet on error
+                    }
+                }
             } else {
                 let gen_size = std::mem::size_of::<GeneralPacketHeader>();
                 let gen_hdr = &ps.data[..gen_size];
                 let payload = &ps.data[gen_size..];
 
                 let nonce = self.get_tx_nonce();
-                let encrypted = self.pipeline.process(payload, nonce);
 
-                let mut out = Vec::with_capacity(gen_size + 8 + encrypted.len());
-                out.extend_from_slice(gen_hdr);
-                out.extend_from_slice(&nonce.to_le_bytes());
-                out.extend_from_slice(&encrypted);
-                out
+                match self.pipeline.process(payload, nonce) {
+                    Ok(encrypted) => {
+                        let mut out = Vec::with_capacity(gen_size + 8 + encrypted.len());
+                        out.extend_from_slice(gen_hdr);
+                        out.extend_from_slice(&nonce.to_le_bytes());
+                        out.extend_from_slice(&encrypted);
+                        out
+                    }
+                    Err(e) => {
+                        eprintln!("Pipeline process failed: {:?}", e);
+                        continue;
+                    }
+                }
             };
 
             send_func(&wire_data);
         }
 
-        // DEFERRED HOT-SWAP: Apply the new encryption key only after pending packets 
-        // (like the Handshake) have been fully encrypted with the OLD key and flushed.
         if let Some(new_pipeline) = self.pending_pipeline_swap.take() {
             self.pipeline = new_pipeline;
         }
     }
-
     pub fn get_tx_nonce(&mut self) -> u64 {
         let current = self.tx_nonce;
         self.tx_nonce += 2;
         current
     }
-    
+
 }

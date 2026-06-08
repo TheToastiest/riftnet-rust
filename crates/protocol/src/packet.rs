@@ -1,7 +1,7 @@
 // packet.rs
 use zerocopy::{FromBytes, AsBytes, FromZeroes, KnownLayout};
+use crate::Tick;
 
-pub type Tick = u64;
 
 // Update your PacketType enum
 #[repr(u8)]

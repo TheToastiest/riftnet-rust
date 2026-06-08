@@ -11,9 +11,9 @@ path = "bin/server.rs"
 name = "client"
 path = "bin/client.rs"
 
-[[bin]]
-name = "client_swarm"
-path = "bin/client_swarm.rs"
+#[[bin]] # Under Construction
+#name = "client_swarm"
+#path = "bin/client_swarm.rs"
 
 [workspace]
 members =[

@@ -77,14 +77,17 @@ fn test_pipeline_rejects_tampering() {
     );
 }
     #[test]
+    #[test]
     fn test_pipeline_roundtrip() {
         let key = [0x42; 32];
         let pipeline = SecurePipeline::new(key);
         let data = b"test_payload";
         let nonce = 101;
 
-        let encrypted = pipeline.process(data, nonce);
-        let decrypted = pipeline.inverse_process(&encrypted, nonce).unwrap();
+        let encrypted = pipeline.process(data, nonce).expect("Process failed");
+        // Handle the result: unwrap to get the Vec, then call unwrap() again
+        // if you are certain decryption should succeed, or use '?' if in a result-returning test
+        let decrypted = pipeline.inverse_process(&encrypted, nonce).expect("Decryption failed");
 
         assert_eq!(data.to_vec(), decrypted);
     }

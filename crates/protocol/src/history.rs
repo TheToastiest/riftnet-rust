@@ -1,6 +1,5 @@
 // history.rs
-pub type Tick = u64;
-
+use crate::Tick;
 #[derive(Clone, Debug)]
 pub struct FrameRecord<T, I> {
     pub tick: Tick,

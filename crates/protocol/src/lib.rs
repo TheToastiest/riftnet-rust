@@ -1,6 +1,8 @@
+pub type Tick = u64;
+
 pub mod packet;
 pub mod protocol;
-mod history;
+pub mod history;
 
 pub use crate::packet::*;
 pub use crate::protocol::*;

@@ -9,10 +9,10 @@ use std::collections::{HashMap, hash_map::DefaultHasher};
 use std::time::Instant;
 use std::hash::Hasher;
 use tokio::time::{interval, Duration, MissedTickBehavior};
-use tracing::{info, warn, debug};
+use tracing::{info};
 use tracing_subscriber::FmtSubscriber;
 use zerocopy::{FromBytes, AsBytes};
-use riftnet_core::FixedVec3::FixedVec3;
+use riftnet_core::fixed_vec3::FixedVec3;
 
 #[derive(Clone, Debug)]
 pub struct WorldState {
@@ -71,7 +71,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut predicted_tick: u64 = 0;
     let mut last_server_tick: u64 = 0;
     let mut rollbacks_this_sec: u32 = 0;
-    let mut current_rtt_ms: u128 = 0;
+    let current_rtt_ms: u128 = 0;
     let mut last_seen_packet_time = Instant::now();
 
     info!(target_server = %server_addr, "CLIENT INITIALIZED - AWAITING SYNC");
@@ -190,7 +190,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 hash = world.calculate_hash(),
                 rollbacks = rollbacks_this_sec,
                 rtt_avg = smoothed_rtt,
-                
+
                 "Telemetry Pulse"
             );
             rollbacks_this_sec = 0;

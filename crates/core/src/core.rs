@@ -3,8 +3,16 @@ use std::fmt;
 #[derive(Debug)]
 pub enum RiftError {
     NetworkError(String),
-    EncryptionError,
     CompressionError,
+    CompressionFailed,
+    DecompressionError,
+    DecompressionFailed,
+    EncryptionError,
+    EncryptionFailed,
+    DecryptionError,
+    DecryptionFailed,
+    CapacityExceeded,
+    ThreadPanic,
 }
 
 impl fmt::Display for RiftError {

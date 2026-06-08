@@ -13,7 +13,7 @@ use tokio::time::{interval, Duration, MissedTickBehavior};
 use tracing::{info, debug, Level, warn};
 use tracing_subscriber::FmtSubscriber;
 use zerocopy::{FromBytes, AsBytes};
-use riftnet_core::FixedVec3::FixedVec3;
+use riftnet_core::fixed_vec3::FixedVec3;
 
 #[derive(Clone, Debug)]
 pub struct WorldState {
@@ -158,12 +158,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
 
         // 5. Queue Broadcasts
-        // 5. Queue Broadcasts
         for (addr, session) in client_sessions.iter_mut() {
-            // Check if the pipeline is actually secure before broadcasting state
-            if let Some(conn) = manager.get_active_connections().get(addr) {
-                // Assuming we can check if the pipeline is no longer the static POC key
-                // Alternatively, add a `is_handshake_complete` bool to your Connection struct
+            if let Some(_conn) = manager.get_active_connections().get(addr) {
                 let snap_hdr = SnapshotHeader {
                     tick: current_tick,
                     state_hash: hash,

@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::time::Instant;
-use tracing::{info, warn, debug};
+use tracing::{info, warn};
 use zerocopy::FromBytes;
 use riftnet_protocol::packet::{GeneralPacketHeader, ReliabilityPacketHeader, PacketType, DisconnectPacket, HandshakePacket};
 use riftnet_protocol::ReliableConnectionState;
@@ -9,7 +9,7 @@ use crate::connection::Connection;
 use crate::pipeline::SecurePipeline;
 use crate::NetworkPipeline;
 use zerocopy::AsBytes;
-
+// use riftnet_core::RiftError;
 pub struct ConnectionManager {
     connections: HashMap<SocketAddr, Connection>,
 }
@@ -60,31 +60,33 @@ impl ConnectionManager {
                 let rel_size = std::mem::size_of::<ReliabilityPacketHeader>();
 
                 if data.len() >= gen_size + rel_size {
-                    // Safe slice reading using zerocopy
                     if let Some(rel_hdr) = ReliabilityPacketHeader::read_from_prefix(&data[gen_size..]) {
-                        // THIS UPDATES THE ACKS ON BOTH CLIENT AND SERVER
                         conn.state.process_incoming_header(&rel_hdr, Instant::now());
 
                         let payload_offset = gen_size + rel_size;
                         let nonce = rel_hdr.sequence as u64;
 
-                        // Decrypt inner bytes
-                        if let Some(decrypted) = conn.pipeline.inverse_process(&data[payload_offset..], nonce) {
-
-                            // Check if the decrypted payload is the Handshake
-                            if let Some(inner_hdr) = GeneralPacketHeader::read_from_prefix(&decrypted) {
-                                if inner_hdr.packet_type == PacketType::Reliable as u8 {
-                                    let hs_offset = std::mem::size_of::<GeneralPacketHeader>();
-                                    if decrypted.len() >= hs_offset + std::mem::size_of::<HandshakePacket>() {
-                                        if let Some(hs) = HandshakePacket::read_from_prefix(&decrypted[hs_offset..]) {
-                                            info!(server = %addr, "CLIENT: Received Secure Handshake Key. Hot-swapping pipeline.");
-                                            conn.pipeline = Box::new(SecurePipeline::new(hs.session_key));
-                                            return None; // Handshake consumed, do not pass to app
+                        // FIX: Handle Result instead of Option
+                        match conn.pipeline.inverse_process(&data[payload_offset..], nonce) {
+                            Ok(decrypted) => {
+                                if let Some(inner_hdr) = GeneralPacketHeader::read_from_prefix(&decrypted) {
+                                    if inner_hdr.packet_type == PacketType::Reliable as u8 {
+                                        let hs_offset = std::mem::size_of::<GeneralPacketHeader>();
+                                        if decrypted.len() >= hs_offset + std::mem::size_of::<HandshakePacket>() {
+                                            if let Some(hs) = HandshakePacket::read_from_prefix(&decrypted[hs_offset..]) {
+                                                info!(server = %addr, "CLIENT: Received Secure Handshake Key.");
+                                                conn.pipeline = Box::new(SecurePipeline::new(hs.session_key));
+                                                return None;
+                                            }
                                         }
                                     }
                                 }
+                                return Some(decrypted);
                             }
-                            return Some(decrypted);
+                            Err(e) => {
+                                warn!(client = %addr, error = ?e, "Reliable packet decryption failed");
+                                return None;
+                            }
                         }
                     }
                 }
@@ -95,10 +97,17 @@ impl ConnectionManager {
                 nonce_bytes.copy_from_slice(&data[gen_size..gen_size + 8]);
                 let nonce = u64::from_le_bytes(nonce_bytes);
 
-                if let Some(decrypted) = conn.pipeline.inverse_process(&data[gen_size + 8..], nonce) {
-                    let mut full_packet = gen_hdr.as_bytes().to_vec();
-                    full_packet.extend(decrypted);
-                    return Some(full_packet);
+                // FIX: Handle Result instead of Option
+                match conn.pipeline.inverse_process(&data[gen_size + 8..], nonce) {
+                    Ok(decrypted) => {
+                        let mut full_packet = gen_hdr.as_bytes().to_vec();
+                        full_packet.extend(decrypted);
+                        return Some(full_packet);
+                    }
+                    Err(e) => {
+                        warn!(client = %addr, error = ?e, "Unreliable packet decryption failed");
+                        return None;
+                    }
                 }
             }
             t if t == PacketType::Disconnect as u8 => {
